@@ -17,7 +17,7 @@ AVOutputFormat *oformat = nullptr;
 int fps = 30;
 
 static void pushFrame(uint8_t *data){
-    cctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    //cctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     int err;
     if (!videoFrame) {
 
@@ -60,6 +60,16 @@ pkt.dts = (1/30) * (frameCounter);
 pkt.pos = frameCounter-1;
 
     if (avcodec_receive_packet(cctx, &pkt) == 0) {
+        static int counter = 0;
+                if (counter == 0){
+            FILE *fp = fopen("dump_first_frame1.dat", "wb");
+            fwrite(pkt.data, pkt.size,1,fp);
+            fclose(fp);
+        }
+        std::cout << "pkt key: " << (pkt.flags & AV_PKT_FLAG_KEY) <<" " << pkt.size << " " << (counter++) << std::endl;
+        uint8_t *size = ((uint8_t*)pkt.data);
+        std::cout << "first: " << (int)size[0] << " " << (int)size[1] << " " << (int)size[2] << " " << (int)size[3] <<" "  << (int)size[4] << " " << (int)size[5] << " " << (int)size[6] << " " << (int)size[7] << std::endl;
+
         av_interleaved_write_frame(ofctx, &pkt);
         av_packet_unref(&pkt);
     }
@@ -76,6 +86,8 @@ static void finish() {
         avcodec_send_frame(cctx, NULL);
         if (avcodec_receive_packet(cctx, &pkt) == 0) {
             av_interleaved_write_frame(ofctx, &pkt);
+
+            
             av_packet_unref(&pkt);
         }
         else {
@@ -96,7 +108,7 @@ static void remux() {
     AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
     int err;
 
-    if ((err = avformat_open_input(&ifmt_ctx, "test.webm", 0, 0)) < 0) {
+    if ((err = avformat_open_input(&ifmt_ctx, "test.h264", 0, 0)) < 0) {
         std::cout << "Failed to open input file for remuxing" <<err<<std::endl;
         //goto end;
         return;
@@ -109,7 +121,7 @@ static void remux() {
         //goto end;
         return;
     }
-    if ((err = avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, "final.webm"))) {
+    if ((err = avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, "final.mp4"))) {
         std::cout << "Failed to allocate output context" << err<<std::endl;
         //goto end;
         return;
@@ -127,7 +139,7 @@ static void remux() {
     outVideoStream->codecpar->codec_tag = 0;
 
     if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-        if ((err = avio_open(&ofmt_ctx->pb, "final.webm", AVIO_FLAG_WRITE)) < 0) {
+        if ((err = avio_open(&ofmt_ctx->pb, "final.mp4", AVIO_FLAG_WRITE)) < 0) {
             std::cout <<"Failed to open output file" <<  err<<std::endl;
             //goto end;
             return;
@@ -153,11 +165,23 @@ static void remux() {
         ts += videoPkt.duration;
         videoPkt.pos = -1;
 
+        static int counter = 0;
+
+        if (counter == 0){
+            FILE *fp = fopen("dump_remix_frame1.dat", "wb");
+            fwrite(videoPkt.data, videoPkt.size,1,fp);
+            fclose(fp);
+        }
+        std::cout << "pkt key: " << (videoPkt.flags & AV_PKT_FLAG_KEY) <<" " << videoPkt.size << " " << (counter++) << std::endl;
+        uint8_t *size = ((uint8_t*)videoPkt.data);
+        std::cout << "second: " << (int)size[0] << " " << (int)size[1] << " " << (int)size[2] << " " << (int)size[3] <<" "  << (int)size[4] << " " << (int)size[5] << " " << (int)size[6] << " " << (int)size[7] << std::endl;
+
         if ((err = av_interleaved_write_frame(ofmt_ctx, &videoPkt)) < 0) {
-            std::cout << "Failed to mux packet" << err << std::endl;
+            //std::cout << "Failed to mux packet" << err << std::endl;
             av_packet_unref(&videoPkt);
             break;
         }
+
         av_packet_unref(&videoPkt);
     }
 
@@ -196,7 +220,7 @@ int main(int argc, char *argv[])
     av_register_all();
     avcodec_register_all();
 
-    oformat = av_guess_format(nullptr, "test.webm", nullptr);
+    oformat = av_guess_format(nullptr, "test.mp4", nullptr);
     if (!oformat)
     {
         std::cout << "can't create output format" << std::endl;
@@ -204,7 +228,7 @@ int main(int argc, char *argv[])
     }
     //oformat->video_codec = AV_CODEC_ID_H265;
 
-    int err = avformat_alloc_output_context2(&ofctx, oformat, nullptr, "test.webm");
+    int err = avformat_alloc_output_context2(&ofctx, oformat, nullptr, "test.mp4");
 
     if (err)
     {
@@ -268,7 +292,7 @@ int main(int argc, char *argv[])
     //std::cout << "extradata_size: " << stream->codecpar->extradata_size << std::endl;
    if (ofctx->oformat->flags & AVFMT_GLOBALHEADER) {
 
-        cctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+      //  cctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     }
     avcodec_parameters_from_context(stream->codecpar, cctx);
 
@@ -291,7 +315,7 @@ int main(int argc, char *argv[])
     }
 
     if (!(oformat->flags & AVFMT_NOFILE)) {
-        if ((err = avio_open(&ofctx->pb, "test.webm", AVIO_FLAG_WRITE)) < 0) {
+        if ((err = avio_open(&ofctx->pb, "test.mp4", AVIO_FLAG_WRITE)) < 0) {
             std::cout << "Failed to open file" << err << std::endl;
             return -1;
         }
@@ -304,7 +328,7 @@ int main(int argc, char *argv[])
 
   
 
-    av_dump_format(ofctx, 0, "test.webm", 1);
+    av_dump_format(ofctx, 0, "test.mp4", 1);
 
 
     uint8_t *frameraw = new uint8_t[1920*1080*4];
@@ -315,7 +339,7 @@ int main(int argc, char *argv[])
 
     delete [] frameraw;
     finish();
-    remux();
+    //remux();
     free();
     return 0;
 }
