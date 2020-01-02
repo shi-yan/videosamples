@@ -43,15 +43,7 @@ static void pushFrame(uint8_t *data){
     // From RGB to YUV
     sws_scale(swsCtx, (const uint8_t * const *)&data, inLinesize, 0, cctx->height, videoFrame->data, videoFrame->linesize);
 
-
-    //int64_t now = AV_TIME_BASE / 30 * (frameCounter++);
-    //videoFrame->pts = av_rescale_q(now,  (AVRational){1, AV_TIME_BASE}, cctx->time_base);
-
-    videoFrame->pts = 3000*(frameCounter++);
-
-    //av_usleep(30000);
-
-    //videoFrame->pts = ((frameCounter++) *AV_TIME_BASE* (double)cctx->time_base.num / cctx->time_base.den);
+    videoFrame->pts = (1.0/30.0)*90000*(frameCounter++);
 
     std::cout << videoFrame->pts <<" " << cctx->time_base.num << " " << cctx->time_base.den << " " << frameCounter<< std::endl;
 
@@ -65,10 +57,6 @@ AV_TIME_BASE;
     pkt.data = NULL;
     pkt.size = 0;
     pkt.flags |= AV_PKT_FLAG_KEY;
-   // pkt.stream_index = 0;
-   // pkt.pts = videoFrame->pts;
-  //  pkt.dts = videoFrame->pts;
-  //  pkt.pos = frameCounter-1;
 
     if (avcodec_receive_packet(cctx, &pkt) == 0) {
         static int counter = 0;
@@ -115,101 +103,6 @@ static void finish() {
     }
 }
 
-static void remux() {
-    AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
-    int err;
-
-    if ((err = avformat_open_input(&ifmt_ctx, "test.h264", 0, 0)) < 0) {
-        std::cout << "Failed to open input file for remuxing" <<err<<std::endl;
-        //goto end;
-        return;
-    }
-
-    //std::cout << "=============== size: " << ifmt_ctx->extradata_size<<std::endl;
-
-    if ((err = avformat_find_stream_info(ifmt_ctx, 0)) < 0) {
-        std::cout <<"Failed to retrieve input stream information"<< err<<std::endl;
-        //goto end;
-        return;
-    }
-    if ((err = avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, "final.mp4"))) {
-        std::cout << "Failed to allocate output context" << err<<std::endl;
-        //goto end;
-        return;
-    }
-
-    AVStream *inVideoStream = ifmt_ctx->streams[0];
-    AVStream *outVideoStream = avformat_new_stream(ofmt_ctx, NULL);
-    if (!outVideoStream) {
-        std::cout <<"Failed to allocate output video stream"<< 0<<std::endl;
-        //goto end;
-        return;
-    }
-    outVideoStream->time_base = { 1, fps };
-    avcodec_parameters_copy(outVideoStream->codecpar, inVideoStream->codecpar);
-    outVideoStream->codecpar->codec_tag = 0;
-
-    if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-        if ((err = avio_open(&ofmt_ctx->pb, "final.mp4", AVIO_FLAG_WRITE)) < 0) {
-            std::cout <<"Failed to open output file" <<  err<<std::endl;
-            //goto end;
-            return;
-        }
-    }
-
-    if ((err = avformat_write_header(ofmt_ctx, 0)) < 0) {
-        std::cout <<"Failed to write header to output file" <<err<<std::endl;
-        //goto end;
-        return;
-    }
-
-    AVPacket videoPkt;
-    int ts = 0;
-    while (true) {
-        if ((err = av_read_frame(ifmt_ctx, &videoPkt)) < 0) {
-            break;
-        }
-        videoPkt.stream_index = outVideoStream->index;
-        videoPkt.pts = ts;
-        videoPkt.dts = ts;
-        videoPkt.duration = av_rescale_q(videoPkt.duration, inVideoStream->time_base, outVideoStream->time_base);
-        ts += videoPkt.duration;
-        videoPkt.pos = -1;
-
-        static int counter = 0;
-
-        if (counter == 0){
-            FILE *fp = fopen("dump_remix_frame1.dat", "wb");
-            fwrite(videoPkt.data, videoPkt.size,1,fp);
-            fclose(fp);
-        }
-        std::cout << "pkt key: " << (videoPkt.flags & AV_PKT_FLAG_KEY) <<" " << videoPkt.size << " " << (counter++) << std::endl;
-        uint8_t *size = ((uint8_t*)videoPkt.data);
-        std::cout << "second: " << (int)size[0] << " " << (int)size[1] << " " << (int)size[2] << " " << (int)size[3] <<" "  << (int)size[4] << " " << (int)size[5] << " " << (int)size[6] << " " << (int)size[7] << std::endl;
-
-        if ((err = av_interleaved_write_frame(ofmt_ctx, &videoPkt)) < 0) {
-            //std::cout << "Failed to mux packet" << err << std::endl;
-            av_packet_unref(&videoPkt);
-            break;
-        }
-
-        av_packet_unref(&videoPkt);
-    }
-
-    av_write_trailer(ofmt_ctx);
-
-//end:
-    if (ifmt_ctx) {
-        avformat_close_input(&ifmt_ctx);
-    }
-    if (ofmt_ctx && !(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
-        avio_closep(&ofmt_ctx->pb);
-    }
-    if (ofmt_ctx) {
-        avformat_free_context(ofmt_ctx);
-    }
-}
-
 static void free(){
     if (videoFrame) {
         av_frame_free(&videoFrame);
@@ -237,7 +130,7 @@ int main(int argc, char *argv[])
         std::cout << "can't create output format" << std::endl;
         return -1;
     }
-    //oformat->video_codec = AV_CODEC_ID_H265;
+    oformat->video_codec = AV_CODEC_ID_H265;
 
     int err = avformat_alloc_output_context2(&ofctx, oformat, nullptr, "test.mp4");
 
@@ -278,13 +171,12 @@ int main(int argc, char *argv[])
     stream->codecpar->height = height;
     stream->codecpar->format = AV_PIX_FMT_YUV420P;
     stream->codecpar->bit_rate = bitrate * 1000;
-    //stream->time_base = (AVRational){ 1, fps };
-    //stream->framerate = (AVRational){fps, 1};
     avcodec_parameters_to_context(cctx, stream->codecpar);
     cctx->time_base = (AVRational){ 1, 1 };
     cctx->max_b_frames = 2;
     cctx->gop_size = 12;
     cctx->framerate= (AVRational){fps, 1};
+
     if (stream->codecpar->codec_id == AV_CODEC_ID_H264) {
         av_opt_set(cctx, "preset", "ultrafast", 0);
     }
@@ -322,7 +214,6 @@ int main(int argc, char *argv[])
 
     delete [] frameraw;
     finish();
-    //remux();
     free();
     return 0;
 }
