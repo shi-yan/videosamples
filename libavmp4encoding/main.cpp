@@ -4,6 +4,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
+#include <libavutil/time.h>
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 }
@@ -15,12 +16,13 @@ int frameCounter = 0;
 AVFormatContext *ofctx = nullptr;
 AVOutputFormat *oformat = nullptr;
 int fps = 30;
+int width = 1920;
+int height = 1080;
+int bitrate = 2000;
 
 static void pushFrame(uint8_t *data){
-    //cctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
     int err;
     if (!videoFrame) {
-
         videoFrame = av_frame_alloc();
         videoFrame->format = AV_PIX_FMT_YUV420P;
         videoFrame->width = cctx->width;
@@ -41,23 +43,32 @@ static void pushFrame(uint8_t *data){
     // From RGB to YUV
     sws_scale(swsCtx, (const uint8_t * const *)&data, inLinesize, 0, cctx->height, videoFrame->data, videoFrame->linesize);
 
-    videoFrame->pts = (double)cctx->time_base.num / cctx->time_base.den * 90 * (frameCounter++);
+
+    //int64_t now = AV_TIME_BASE / 30 * (frameCounter++);
+    //videoFrame->pts = av_rescale_q(now,  (AVRational){1, AV_TIME_BASE}, cctx->time_base);
+
+    videoFrame->pts = 3000*(frameCounter++);
+
+    //av_usleep(30000);
+
+    //videoFrame->pts = ((frameCounter++) *AV_TIME_BASE* (double)cctx->time_base.num / cctx->time_base.den);
+
+    std::cout << videoFrame->pts <<" " << cctx->time_base.num << " " << cctx->time_base.den << " " << frameCounter<< std::endl;
 
     if ((err = avcodec_send_frame(cctx, videoFrame)) < 0) {
         std::cout << "Failed to send frame" << err <<std::endl;
         return;
     }
-
+AV_TIME_BASE;
     AVPacket pkt;
     av_init_packet(&pkt);
     pkt.data = NULL;
     pkt.size = 0;
     pkt.flags |= AV_PKT_FLAG_KEY;
-    pkt.stream_index = 0;
-    pkt.pts = videoFrame->pts;
-    pkt.pts = (1/30) * frameCounter; // stupid try to set pts and dts somehow... Working on this...
-pkt.dts = (1/30) * (frameCounter);
-pkt.pos = frameCounter-1;
+   // pkt.stream_index = 0;
+   // pkt.pts = videoFrame->pts;
+  //  pkt.dts = videoFrame->pts;
+  //  pkt.pos = frameCounter-1;
 
     if (avcodec_receive_packet(cctx, &pkt) == 0) {
         static int counter = 0;
@@ -261,24 +272,19 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    int width = 1920;
-    int height = 1080;
-    int fps = 30;
-    int bitrate = 120000;
-
-
     stream->codecpar->codec_id = oformat->video_codec;
     stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
     stream->codecpar->width = width;
     stream->codecpar->height = height;
     stream->codecpar->format = AV_PIX_FMT_YUV420P;
     stream->codecpar->bit_rate = bitrate * 1000;
-    stream->time_base = { 1, fps };
-
+    //stream->time_base = (AVRational){ 1, fps };
+    //stream->framerate = (AVRational){fps, 1};
     avcodec_parameters_to_context(cctx, stream->codecpar);
-    cctx->time_base = { 1, fps };
+    cctx->time_base = (AVRational){ 1, 1 };
     cctx->max_b_frames = 2;
     cctx->gop_size = 12;
+    cctx->framerate= (AVRational){fps, 1};
     if (stream->codecpar->codec_id == AV_CODEC_ID_H264) {
         av_opt_set(cctx, "preset", "ultrafast", 0);
     }
@@ -286,34 +292,14 @@ int main(int argc, char *argv[])
     {
         av_opt_set(cctx, "preset", "ultrafast", 0);
     }
-    //cctx->extradata = stream->codecpar->extradata;
-    //cctx->extradata_size = stream->codecpar->extradata_size;
 
-    //std::cout << "extradata_size: " << stream->codecpar->extradata_size << std::endl;
-   if (ofctx->oformat->flags & AVFMT_GLOBALHEADER) {
-
-      //  cctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-    }
     avcodec_parameters_from_context(stream->codecpar, cctx);
 
     if ((err = avcodec_open2(cctx, codec, NULL)) < 0) {
         std::cout << "Failed to open codec" << err << std::endl;
         return -1;
     }
-       std::cout << "global header ===================" << std::endl;
-
-            std::cout << "extra data:" << cctx->extradata_size<<std::endl;
-
-
-  if( cctx->extradata == NULL || cctx->extradata_size == 0 )
-      {  
-          std::cout << "No codec extradata available!"<<std::endl;
-      }
-    else
-    {
-        std::cout << "extra data:" << cctx->extradata_size<<std::endl;
-    }
-
+  
     if (!(oformat->flags & AVFMT_NOFILE)) {
         if ((err = avio_open(&ofctx->pb, "test.mp4", AVIO_FLAG_WRITE)) < 0) {
             std::cout << "Failed to open file" << err << std::endl;
@@ -326,10 +312,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-  
-
     av_dump_format(ofctx, 0, "test.mp4", 1);
-
 
     uint8_t *frameraw = new uint8_t[1920*1080*4];
     memset(frameraw, 222, 1920*1080*4);
